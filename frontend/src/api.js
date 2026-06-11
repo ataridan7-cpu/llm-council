@@ -180,6 +180,12 @@ export const api = {
     return response.json();
   },
 
+  async getPortfolio() {
+    const response = await fetch(`${API_BASE}/api/portfolio`);
+    if (!response.ok) throw new Error('Failed to get portfolio summary');
+    return response.json();
+  },
+
   // Watchlist (live quotes + alerts, no LLM)
   async getWatchlist() {
     const response = await fetch(`${API_BASE}/api/watchlist`);

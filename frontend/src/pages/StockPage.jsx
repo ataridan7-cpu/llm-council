@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import PriceChart from '../components/PriceChart';
 import VerdictCard from '../components/VerdictCard';
@@ -42,6 +42,10 @@ function StockPage() {
   const { ticker: rawTicker } = useParams();
   const ticker = rawTicker?.toUpperCase();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const tickerIdx = TRACKED_TICKERS.indexOf(ticker);
+  const prevTicker = tickerIdx > 0 ? TRACKED_TICKERS[tickerIdx - 1] : null;
+  const nextTicker = tickerIdx < TRACKED_TICKERS.length - 1 ? TRACKED_TICKERS[tickerIdx + 1] : null;
   const initialAnalysisId = searchParams.get('analysis');
 
   const [overview, setOverview] = useState(null);
@@ -220,6 +224,33 @@ function StockPage() {
 
   return (
     <div className="stock-page">
+      <div className="ticker-nav">
+        <button
+          className="ticker-nav-btn"
+          disabled={!prevTicker}
+          onClick={() => prevTicker && navigate(`/stock/${prevTicker}`)}
+        >
+          ← {prevTicker || ''}
+        </button>
+        <div className="ticker-nav-dots">
+          {TRACKED_TICKERS.map((t) => (
+            <button
+              key={t}
+              className={`ticker-dot ${t === ticker ? 'active' : ''}`}
+              onClick={() => navigate(`/stock/${t}`)}
+              title={t}
+            />
+          ))}
+        </div>
+        <button
+          className="ticker-nav-btn"
+          disabled={!nextTicker}
+          onClick={() => nextTicker && navigate(`/stock/${nextTicker}`)}
+        >
+          {nextTicker || ''} →
+        </button>
+      </div>
+
       <div className="stock-header">
         <div className="stock-title">
           <h1>{ticker}</h1>
@@ -274,18 +305,19 @@ function StockPage() {
             <section className="stock-section">
               <h2>
                 Council Verdict
-                {/* Show latest evaluated alpha vs S&P 500 */}
                 {(() => {
-                  const latestEvaluated = predictions.find(
+                  // Find the prediction matching this analysis and show best evaluated alpha
+                  const matchedPred = predictions.find(
                     (p) => p.analysis_id === displayAnalysis.id
                   );
-                  // alpha is per-outcome; show the most recent evaluated one
-                  const evalOutcomes = Object.values(
-                    (analysis?.outcomes) || {}
-                  ).filter((o) => o?.status === 'evaluated' && o?.alpha != null);
-                  if (evalOutcomes.length === 0) return null;
-                  const latest = evalOutcomes[evalOutcomes.length - 1];
-                  return <AlphaBadge alpha={latest.alpha} />;
+                  if (!matchedPred) return null;
+                  const evalOutcomes = Object.values(matchedPred.outcomes || {})
+                    .filter((o) => o?.status === 'evaluated' && o?.alpha != null);
+                  if (!evalOutcomes.length) return null;
+                  const best = evalOutcomes.sort((a, b) =>
+                    Math.abs(b.alpha) - Math.abs(a.alpha)
+                  )[0];
+                  return <AlphaBadge alpha={best.alpha} />;
                 })()}
               </h2>
               <VerdictCard verdict={displayAnalysis.stage3.verdict} ticker={ticker} />

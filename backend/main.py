@@ -16,7 +16,7 @@ from .council import run_full_council, generate_conversation_title, stage1_colle
 from .analysis import run_stock_analysis, stage1_collect_verdicts, stage3_chairman_report, build_analysis_question
 from .market_data import get_price_history
 from .research import build_dossier, gather_market_data
-from .scorecard import evaluate_due_predictions, compute_leaderboard, record_prediction, enrich_prediction_with_spy
+from .scorecard import evaluate_due_predictions, compute_leaderboard, compute_portfolio_summary, record_prediction, enrich_prediction_with_spy
 from .config import TRACKED_TICKERS, ENABLE_SCHEDULER
 from .watchlist import refresh_watchlist
 
@@ -434,6 +434,12 @@ async def get_scorecard():
 async def trigger_evaluate():
     result = await evaluate_due_predictions()
     return result
+
+
+@app.get("/api/portfolio")
+async def get_portfolio_summary():
+    """Portfolio-level aggregate performance across all 7 tickers vs S&P 500."""
+    return compute_portfolio_summary()
 
 
 @app.get("/api/predictions")

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import './ScorecardPage.css';
 
@@ -33,12 +34,100 @@ function AlphaCell({ alpha, beatRate }) {
   );
 }
 
+const VERDICT_COLOR = { buy: '#22a74f', hold: '#e6a817', sell: '#e53e3e' };
+
+function PortfolioPanel({ portfolio }) {
+  const navigate = useNavigate();
+  if (!portfolio) return null;
+  const p = portfolio.portfolio;
+  const tickers = portfolio.tickers || [];
+
+  if (p.n_evaluated === 0) return null;
+
+  const alphaPos = p.avg_alpha != null && p.avg_alpha >= 0;
+
+  return (
+    <div className="portfolio-panel">
+      <h2>Portfolio Summary</h2>
+      <p className="portfolio-sub">
+        Equal-weight council verdicts across all 7 tickers vs S&amp;P 500 (SPY benchmark)
+      </p>
+      <div className="portfolio-kpis">
+        <div className="kpi">
+          <span className="kpi-label">Avg Alpha vs SPY</span>
+          <span className="kpi-value" style={{ color: alphaPos ? '#22a74f' : '#e53e3e' }}>
+            {p.avg_alpha != null ? `${alphaPos ? '+' : ''}${(p.avg_alpha * 100).toFixed(2)}%` : '—'}
+          </span>
+        </div>
+        <div className="kpi">
+          <span className="kpi-label">Beat SPY Rate</span>
+          <span className="kpi-value">
+            {p.beat_spy_rate != null ? `${Math.round(p.beat_spy_rate * 100)}%` : '—'}
+          </span>
+        </div>
+        <div className="kpi">
+          <span className="kpi-label">Verdict Hit Rate</span>
+          <span className="kpi-value">
+            {p.verdict_hit_rate != null ? `${Math.round(p.verdict_hit_rate * 100)}%` : '—'}
+          </span>
+        </div>
+        <div className="kpi">
+          <span className="kpi-label">Avg Return</span>
+          <span className="kpi-value" style={{ color: p.avg_return >= 0 ? '#22a74f' : '#e53e3e' }}>
+            {p.avg_return != null ? `${p.avg_return >= 0 ? '+' : ''}${(p.avg_return * 100).toFixed(2)}%` : '—'}
+          </span>
+        </div>
+        <div className="kpi">
+          <span className="kpi-label">Positions Evaluated</span>
+          <span className="kpi-value">{p.n_evaluated}</span>
+        </div>
+      </div>
+
+      <div className="portfolio-ticker-grid">
+        {tickers.map((row) => {
+          const tf1w = row.timeframes?.['1w'];
+          const alpha1w = tf1w?.avg_alpha;
+          const pos = alpha1w != null && alpha1w >= 0;
+          const latestVerdict = Object.entries(row.verdicts || {})
+            .sort((a, b) => b[1] - a[1])[0]?.[0];
+          return (
+            <button
+              key={row.ticker}
+              className="portfolio-ticker-card"
+              onClick={() => navigate(`/stock/${row.ticker}`)}
+            >
+              <div className="ptc-ticker">{row.ticker}</div>
+              {latestVerdict && (
+                <div className="ptc-verdict" style={{ color: VERDICT_COLOR[latestVerdict] }}>
+                  {latestVerdict.toUpperCase()}
+                </div>
+              )}
+              {alpha1w != null ? (
+                <div className="ptc-alpha" style={{ color: pos ? '#22a74f' : '#e53e3e' }}>
+                  {pos ? '+' : ''}{(alpha1w * 100).toFixed(1)}% α (1w)
+                </div>
+              ) : (
+                <div className="ptc-alpha no-data">No data yet</div>
+              )}
+              <div className="ptc-meta">{row.n_evaluated} evaluated · {row.n_pending} pending</div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ScorecardPage() {
   const [data, setData] = useState(null);
+  const [portfolio, setPortfolio] = useState(null);
   const [evaluating, setEvaluating] = useState(false);
   const [evalResult, setEvalResult] = useState(null);
 
-  const load = () => api.getScorecard().then(setData).catch(console.error);
+  const load = () => {
+    api.getScorecard().then(setData).catch(console.error);
+    api.getPortfolio().then(setPortfolio).catch(console.error);
+  };
 
   useEffect(() => { load(); }, []);
 
@@ -83,6 +172,8 @@ function ScorecardPage() {
           </button>
         </div>
       </div>
+
+      <PortfolioPanel portfolio={portfolio} />
 
       {leaderboard.length === 0 ? (
         <div className="scorecard-empty">

@@ -74,8 +74,12 @@ def record_prediction(analysis: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _fetch_spy_price_at_prediction(created_at: str) -> Optional[float]:
-    """Get SPY price closest to the prediction date (for baseline)."""
+    """Get SPY price at prediction creation time — uses live quote, falls back to next close."""
     try:
+        quote = await get_quote(BENCHMARK_TICKER)
+        if quote and quote.get("price"):
+            return quote["price"]
+        # Fallback: first close on or after the prediction date
         close = await get_close_on_or_after(BENCHMARK_TICKER, created_at)
         return close["close"] if close else None
     except Exception:
@@ -328,3 +332,110 @@ def compute_leaderboard() -> Dict[str, Any]:
 
     leaderboard.sort(key=lambda x: -(x["overall"]["verdict_hit_rate"] or 0))
     return {"leaderboard": leaderboard}
+
+
+def compute_portfolio_summary() -> Dict[str, Any]:
+    """
+    Portfolio-level summary: treat every council verdict as an equal-weight
+    position and compute aggregate returns + alpha vs S&P 500.
+    Includes a per-ticker breakdown.
+    """
+    from . import storage
+    from .config import TRACKED_TICKERS
+
+    per_ticker: Dict[str, Dict[str, Any]] = {t: {
+        "ticker": t,
+        "n_evaluated": 0,
+        "n_pending": 0,
+        "n_total": 0,
+        "verdicts": {"buy": 0, "hold": 0, "sell": 0},
+        "timeframes": {},
+        "alphas": [],
+    } for t in TRACKED_TICKERS}
+
+    all_alphas: List[float] = []
+    all_returns: List[float] = []
+    all_verdict_hits: List[bool] = []
+
+    for pred_meta in storage.list_predictions():
+        pred = storage.get_prediction(pred_meta["id"])
+        if pred is None:
+            continue
+
+        ticker = pred.get("ticker")
+        if ticker not in per_ticker:
+            continue
+
+        bucket = per_ticker[ticker]
+        bucket["n_total"] += 1
+
+        council_verdict_obj = pred.get("council_verdict")
+        cv = (council_verdict_obj or {}).get("verdict")
+        if cv in bucket["verdicts"]:
+            bucket["verdicts"][cv] += 1
+
+        any_evaluated = False
+        for tf, outcome in pred.get("outcomes", {}).items():
+            if outcome.get("status") != "evaluated":
+                continue
+            any_evaluated = True
+            alpha = outcome.get("alpha")
+            ret = outcome.get("actual_return")
+            score = score_one(council_verdict_obj, pred.get("price_at_prediction", 0),
+                              outcome.get("actual_price", 0), tf)
+
+            if tf not in bucket["timeframes"]:
+                bucket["timeframes"][tf] = {"alphas": [], "returns": [], "verdict_hits": []}
+
+            if alpha is not None:
+                bucket["timeframes"][tf]["alphas"].append(alpha)
+                all_alphas.append(alpha)
+            if ret is not None:
+                bucket["timeframes"][tf]["returns"].append(ret)
+                all_returns.append(ret)
+            if score.get("verdict_hit") is not None:
+                bucket["timeframes"][tf]["verdict_hits"].append(score["verdict_hit"])
+                all_verdict_hits.append(score["verdict_hit"])
+                if score["verdict_hit"]:
+                    bucket["alphas"].append(alpha or 0.0)
+
+        if any_evaluated:
+            bucket["n_evaluated"] += 1
+        else:
+            bucket["n_pending"] += 1
+
+    # Summarise per-ticker timeframes
+    ticker_rows = []
+    for ticker, bucket in per_ticker.items():
+        tf_summary = {}
+        for tf, vals in bucket["timeframes"].items():
+            alphas = vals["alphas"]
+            rets = vals["returns"]
+            vhits = vals["verdict_hits"]
+            tf_summary[tf] = {
+                "avg_alpha": round(sum(alphas) / len(alphas), 4) if alphas else None,
+                "avg_return": round(sum(rets) / len(rets), 4) if rets else None,
+                "verdict_hit_rate": round(sum(vhits) / len(vhits), 3) if vhits else None,
+                "n": len(alphas) or len(rets),
+            }
+
+        ticker_rows.append({
+            "ticker": ticker,
+            "n_total": bucket["n_total"],
+            "n_evaluated": bucket["n_evaluated"],
+            "n_pending": bucket["n_pending"],
+            "verdicts": bucket["verdicts"],
+            "timeframes": tf_summary,
+        })
+
+    # Portfolio-wide aggregates
+    total_n = len(all_alphas)
+    portfolio = {
+        "n_evaluated": total_n,
+        "avg_alpha": round(sum(all_alphas) / total_n, 4) if all_alphas else None,
+        "beat_spy_rate": round(sum(1 for a in all_alphas if a > 0) / total_n, 3) if all_alphas else None,
+        "avg_return": round(sum(all_returns) / len(all_returns), 4) if all_returns else None,
+        "verdict_hit_rate": round(sum(all_verdict_hits) / len(all_verdict_hits), 3) if all_verdict_hits else None,
+    }
+
+    return {"portfolio": portfolio, "tickers": ticker_rows}
