@@ -14,7 +14,8 @@ from .council import run_full_council, generate_conversation_title, stage1_colle
 from .analysis import run_stock_analysis, stage1_collect_verdicts, stage3_chairman_report, build_analysis_question
 from .market_data import get_price_history
 from .research import build_dossier, gather_market_data
-from .scorecard import evaluate_due_predictions, compute_leaderboard, record_prediction
+from .scorecard import evaluate_due_predictions, compute_leaderboard, record_prediction, enrich_prediction_with_spy
+from .config import TRACKED_TICKERS
 
 app = FastAPI(title="LLM Council API")
 
@@ -210,11 +211,28 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
+@app.get("/api/tickers")
+async def list_tracked_tickers():
+    """Return the fixed list of tracked tickers."""
+    return {"tickers": TRACKED_TICKERS}
+
+
+def _validate_ticker(ticker: str) -> str:
+    t = ticker.strip().upper()
+    if t not in TRACKED_TICKERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{t}' is not in the tracked universe. Supported tickers: {', '.join(TRACKED_TICKERS)}"
+        )
+    return t
+
+
 @app.post("/api/analyses")
 async def create_analysis(request: AnalysisRequest):
-    """Run a full stock analysis (blocking). Returns 404 for unknown tickers."""
+    """Run a full stock analysis (blocking). Returns 400 for out-of-universe tickers."""
+    ticker = _validate_ticker(request.ticker)
     try:
-        analysis = await run_stock_analysis(request.ticker)
+        analysis = await run_stock_analysis(ticker)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return analysis
@@ -223,7 +241,7 @@ async def create_analysis(request: AnalysisRequest):
 @app.post("/api/analyses/stream")
 async def create_analysis_stream(request: AnalysisRequest):
     """Run a full stock analysis, streaming progress as SSE events."""
-    ticker = request.ticker.strip().upper()
+    ticker = _validate_ticker(request.ticker)
 
     async def event_generator():
         try:
@@ -320,6 +338,7 @@ async def create_analysis_stream(request: AnalysisRequest):
             }
             storage.save_analysis(analysis)
             prediction = record_prediction(analysis)
+            await enrich_prediction_with_spy(prediction)
             analysis["prediction_id"] = prediction["id"]
             storage.save_analysis(analysis)
 
@@ -364,6 +383,7 @@ async def stock_history(
 @app.get("/api/stocks/{ticker}/overview")
 async def stock_overview(ticker: str):
     from .market_data import get_quote
+    ticker = _validate_ticker(ticker)
     quote = await get_quote(ticker)
     if quote is None:
         raise HTTPException(status_code=404, detail=f"Unknown ticker: {ticker}")

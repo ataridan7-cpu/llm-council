@@ -9,6 +9,7 @@ import Stage2 from '../components/Stage2';
 import Stage3 from '../components/Stage3';
 import './StockPage.css';
 
+const TRACKED_TICKERS = ['NVDA', 'INTC', 'AMD', 'AMZN', 'AAPL', 'TSLA', 'NFLX'];
 const VERDICT_COLOR = { buy: '#22a74f', hold: '#e6a817', sell: '#e53e3e' };
 
 function StatusBar({ status }) {
@@ -16,8 +17,29 @@ function StatusBar({ status }) {
   return <div className="status-bar">{status}</div>;
 }
 
+function AlphaBadge({ alpha }) {
+  if (alpha == null) return null;
+  const pct = (alpha * 100).toFixed(2);
+  const pos = alpha >= 0;
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '3px 10px',
+      borderRadius: 12,
+      fontSize: 12,
+      fontWeight: 700,
+      background: pos ? '#eafaf1' : '#fef0f0',
+      color: pos ? '#22a74f' : '#e53e3e',
+      marginLeft: 10,
+    }}>
+      {pos ? '+' : ''}{pct}% vs S&P 500
+    </span>
+  );
+}
+
 function StockPage() {
-  const { ticker } = useParams();
+  const { ticker: rawTicker } = useParams();
+  const ticker = rawTicker?.toUpperCase();
   const [searchParams] = useSearchParams();
   const initialAnalysisId = searchParams.get('analysis');
 
@@ -25,21 +47,29 @@ function StockPage() {
   const [history, setHistory] = useState(null);
   const [analysis, setAnalysis] = useState(null);
   const [analyses, setAnalyses] = useState([]);
+  const [predictions, setPredictions] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
   const [status, setStatus] = useState('');
-  const [streamState, setStreamState] = useState(null); // live streaming state
+  const [streamState, setStreamState] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!ticker) return;
+
+    if (!TRACKED_TICKERS.includes(ticker)) {
+      setError(`"${ticker}" is not in the tracked universe (NVDA, INTC, AMD, AMZN, AAPL, TSLA, NFLX).`);
+      return;
+    }
+
     setError(null);
     setAnalysis(null);
     setStreamState(null);
 
     Promise.all([
-      api.getStockOverview(ticker).then(setOverview).catch(() => setError(`Unknown ticker: ${ticker}`)),
+      api.getStockOverview(ticker).then(setOverview).catch(() => setError(`Failed to load ${ticker}`)),
       api.getStockHistory(ticker).then(setHistory).catch(console.error),
       api.listAnalyses(ticker).then(setAnalyses).catch(console.error),
+      api.listPredictions(ticker).then(setPredictions).catch(console.error),
     ]);
   }, [ticker]);
 
@@ -241,7 +271,22 @@ function StockPage() {
         <>
           {displayAnalysis.stage3?.verdict && (
             <section className="stock-section">
-              <h2>Council Verdict</h2>
+              <h2>
+                Council Verdict
+                {/* Show latest evaluated alpha vs S&P 500 */}
+                {(() => {
+                  const latestEvaluated = predictions.find(
+                    (p) => p.analysis_id === displayAnalysis.id
+                  );
+                  // alpha is per-outcome; show the most recent evaluated one
+                  const evalOutcomes = Object.values(
+                    (analysis?.outcomes) || {}
+                  ).filter((o) => o?.status === 'evaluated' && o?.alpha != null);
+                  if (evalOutcomes.length === 0) return null;
+                  const latest = evalOutcomes[evalOutcomes.length - 1];
+                  return <AlphaBadge alpha={latest.alpha} />;
+                })()}
+              </h2>
               <VerdictCard verdict={displayAnalysis.stage3.verdict} ticker={ticker} />
             </section>
           )}

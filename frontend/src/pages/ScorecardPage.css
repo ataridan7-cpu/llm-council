@@ -1,6 +1,6 @@
 .scorecard-page {
   padding: 28px 32px;
-  max-width: 1100px;
+  max-width: 1200px;
   margin: 0 auto;
   overflow-y: auto;
   height: 100%;
@@ -8,15 +8,21 @@
 
 .scorecard-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .scorecard-header h1 {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 800;
   color: #1a2332;
+  margin: 0 0 4px;
+}
+
+.scorecard-sub {
+  font-size: 13px;
+  color: #999;
   margin: 0;
 }
 
@@ -43,13 +49,16 @@
   transition: background 0.15s;
 }
 
-.eval-btn:hover:not(:disabled) {
-  background: #357abd;
-}
+.eval-btn:hover:not(:disabled) { background: #357abd; }
+.eval-btn:disabled { opacity: 0.6; cursor: default; }
 
-.eval-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
+.scorecard-legend {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: #f9f9f9;
+  border-radius: 6px;
 }
 
 .scorecard-empty {
@@ -57,12 +66,18 @@
   padding: 60px 20px;
   color: #aaa;
   font-size: 15px;
+  line-height: 1.7;
+}
+
+.table-wrap {
+  overflow-x: auto;
 }
 
 .leaderboard-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .leaderboard-table th {
@@ -74,12 +89,23 @@
   border-bottom: 2px solid #e0e0e0;
 }
 
+.leaderboard-table .tf-header {
+  background: #eef2f8;
+  text-align: center;
+  font-size: 11px;
+}
+
+.leaderboard-table .overall-header {
+  background: #e8f0fc;
+}
+
 .leaderboard-table .sub-header th {
   font-size: 11px;
   font-weight: 500;
   color: #aaa;
   background: #fafafa;
   border-bottom: 1px solid #eee;
+  text-align: center;
 }
 
 .leaderboard-table td {
@@ -88,26 +114,36 @@
   vertical-align: middle;
 }
 
-.entity-cell {
-  font-size: 13px;
-  color: #333;
-  min-width: 160px;
-}
-
-.n-cell {
-  color: #888;
+.leaderboard-table .center {
   text-align: center;
 }
+
+.council-row td {
+  background: #f8fcff;
+  font-weight: 500;
+}
+
+.entity-cell {
+  min-width: 150px;
+}
+
+.council-sub {
+  font-size: 10px;
+  color: #aaa;
+  font-weight: 400;
+}
+
+.n-cell { color: #888; }
 
 .hit-bar-wrap {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 80px;
+  gap: 5px;
+  min-width: 70px;
 }
 
 .hit-bar {
-  height: 8px;
+  height: 7px;
   flex: 1;
   background: #eee;
   border-radius: 4px;
@@ -117,16 +153,19 @@
 .hit-fill {
   height: 100%;
   border-radius: 4px;
-  transition: width 0.3s;
 }
 
 .hit-pct {
   font-size: 11px;
   color: #555;
-  min-width: 28px;
+  min-width: 26px;
   text-align: right;
 }
 
-.no-data {
-  color: #ccc;
+.no-data { color: #ddd; }
+
+.beat-sub {
+  font-size: 10px;
+  color: #aaa;
+  margin-left: 4px;
 }

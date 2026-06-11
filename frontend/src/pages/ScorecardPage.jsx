@@ -16,6 +16,23 @@ function HitBar({ rate }) {
   );
 }
 
+function AlphaCell({ alpha, beatRate }) {
+  if (alpha == null) return <span className="no-data">—</span>;
+  const pct = (alpha * 100).toFixed(1);
+  const pos = alpha >= 0;
+  const beatPct = beatRate != null ? Math.round(beatRate * 100) : null;
+  return (
+    <div>
+      <span style={{ fontWeight: 700, color: pos ? '#22a74f' : '#e53e3e' }}>
+        {pos ? '+' : ''}{pct}%
+      </span>
+      {beatPct != null && (
+        <span className="beat-sub"> ({beatPct}% beat SPY)</span>
+      )}
+    </div>
+  );
+}
+
 function ScorecardPage() {
   const [data, setData] = useState(null);
   const [evaluating, setEvaluating] = useState(false);
@@ -39,11 +56,22 @@ function ScorecardPage() {
   };
 
   const leaderboard = data?.leaderboard || [];
+  // Put council first
+  const sorted = [...leaderboard].sort((a, b) => {
+    if (a.entity === 'council') return -1;
+    if (b.entity === 'council') return 1;
+    return -(a.overall?.verdict_hit_rate || 0) + (b.overall?.verdict_hit_rate || 0);
+  });
 
   return (
     <div className="scorecard-page">
       <div className="scorecard-header">
-        <h1>Prediction Scorecard</h1>
+        <div>
+          <h1>Prediction Scorecard</h1>
+          <p className="scorecard-sub">
+            Tracking NVDA · INTC · AMD · AMZN · AAPL · TSLA · NFLX vs S&P 500 (SPY)
+          </p>
+        </div>
         <div className="scorecard-actions">
           {evalResult && (
             <span className="eval-result">
@@ -58,53 +86,65 @@ function ScorecardPage() {
 
       {leaderboard.length === 0 ? (
         <div className="scorecard-empty">
-          No evaluated predictions yet. Run some analyses and come back after their target dates.
+          No evaluated predictions yet. Run analyses on the stocks and return after the 1-week, 1-month, and 3-month target dates pass — then click <strong>Evaluate Now</strong>.
         </div>
       ) : (
-        <table className="leaderboard-table">
-          <thead>
-            <tr>
-              <th>Model / Entity</th>
-              <th>Predictions</th>
-              <th colSpan={2}>1 Week</th>
-              <th colSpan={2}>1 Month</th>
-              <th colSpan={2}>3 Month</th>
-              <th colSpan={2}>Overall</th>
-            </tr>
-            <tr className="sub-header">
-              <th></th>
-              <th></th>
-              <th>Direction</th><th>Verdict</th>
-              <th>Direction</th><th>Verdict</th>
-              <th>Direction</th><th>Verdict</th>
-              <th>Direction</th><th>Verdict</th>
-            </tr>
-          </thead>
-          <tbody>
-            {leaderboard.map((row) => {
-              const tf = (timeframe) => row.timeframes?.[timeframe] || {};
-              const overall = row.overall || {};
-              return (
-                <tr key={row.entity}>
-                  <td className="entity-cell">
-                    {row.entity === 'council'
-                      ? <strong>Council (Chairman)</strong>
-                      : row.entity.split('/')[1] || row.entity}
-                  </td>
-                  <td className="n-cell">{overall.n || 0}</td>
-                  <td><HitBar rate={tf('1w').direction_hit_rate} /></td>
-                  <td><HitBar rate={tf('1w').verdict_hit_rate} /></td>
-                  <td><HitBar rate={tf('1m').direction_hit_rate} /></td>
-                  <td><HitBar rate={tf('1m').verdict_hit_rate} /></td>
-                  <td><HitBar rate={tf('3m').direction_hit_rate} /></td>
-                  <td><HitBar rate={tf('3m').verdict_hit_rate} /></td>
-                  <td><HitBar rate={overall.direction_hit_rate} /></td>
-                  <td><HitBar rate={overall.verdict_hit_rate} /></td>
+        <>
+          <div className="scorecard-legend">
+            <strong>Verdict hit</strong> = buy paid off (&gt;+2%), sell paid off (&lt;-2%), hold was flat (±2%).&nbsp;
+            <strong>Alpha</strong> = stock return − S&P 500 return over same window (council picks only).
+          </div>
+          <div className="table-wrap">
+            <table className="leaderboard-table">
+              <thead>
+                <tr>
+                  <th rowSpan={2}>Model / Entity</th>
+                  <th rowSpan={2} className="center">N</th>
+                  <th colSpan={2} className="center tf-header">1 Week</th>
+                  <th colSpan={2} className="center tf-header">1 Month</th>
+                  <th colSpan={2} className="center tf-header">3 Month</th>
+                  <th colSpan={3} className="center tf-header overall-header">Overall</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                <tr className="sub-header">
+                  <th>Dir %</th><th>Verdict %</th>
+                  <th>Dir %</th><th>Verdict %</th>
+                  <th>Dir %</th><th>Verdict %</th>
+                  <th>Dir %</th><th>Verdict %</th><th>Alpha vs SPY</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((row) => {
+                  const tf = (timeframe) => row.timeframes?.[timeframe] || {};
+                  const overall = row.overall || {};
+                  const isCouncil = row.entity === 'council';
+                  return (
+                    <tr key={row.entity} className={isCouncil ? 'council-row' : ''}>
+                      <td className="entity-cell">
+                        {isCouncil
+                          ? <><strong>Council</strong> <span className="council-sub">(Chairman)</span></>
+                          : (row.entity.split('/')[1] || row.entity)}
+                      </td>
+                      <td className="center n-cell">{overall.n || 0}</td>
+                      <td><HitBar rate={tf('1w').direction_hit_rate} /></td>
+                      <td><HitBar rate={tf('1w').verdict_hit_rate} /></td>
+                      <td><HitBar rate={tf('1m').direction_hit_rate} /></td>
+                      <td><HitBar rate={tf('1m').verdict_hit_rate} /></td>
+                      <td><HitBar rate={tf('3m').direction_hit_rate} /></td>
+                      <td><HitBar rate={tf('3m').verdict_hit_rate} /></td>
+                      <td><HitBar rate={overall.direction_hit_rate} /></td>
+                      <td><HitBar rate={overall.verdict_hit_rate} /></td>
+                      <td>
+                        {isCouncil
+                          ? <AlphaCell alpha={overall.avg_alpha} beatRate={overall.beat_spy_rate} />
+                          : <span className="no-data">—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );

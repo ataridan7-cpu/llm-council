@@ -1,12 +1,13 @@
-"""Prediction recording and outcome evaluation."""
+"""Prediction recording and outcome evaluation with S&P 500 benchmark comparison."""
 
+import asyncio
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from .config import HOLD_BAND
-from .market_data import get_close_on_or_after
+from .config import BENCHMARK_TICKER, HOLD_BAND
+from .market_data import get_close_on_or_after, get_quote
 
 
 def _due_at(created_at: str, days: int) -> str:
@@ -25,22 +26,76 @@ def record_prediction(analysis: Dict[str, Any]) -> Dict[str, Any]:
         for r in (analysis.get("stage1") or [])
     ]
 
+    # Record SPY price at prediction time for benchmark comparison
+    spy_price_at = None  # filled async during recording if available
+
     prediction = {
         "id": str(uuid.uuid4()),
         "ticker": analysis["ticker"],
         "analysis_id": analysis["id"],
         "created_at": created_at,
         "price_at_prediction": (analysis.get("market_snapshot") or {}).get("price"),
+        "spy_price_at_prediction": None,  # filled by record_prediction_with_spy
         "council_verdict": council_verdict,
         "model_verdicts": model_verdicts,
         "outcomes": {
-            "1w": {"due_at": _due_at(created_at, 7), "status": "pending", "actual_price": None, "actual_return": None, "results": {}},
-            "1m": {"due_at": _due_at(created_at, 30), "status": "pending", "actual_price": None, "actual_return": None, "results": {}},
-            "3m": {"due_at": _due_at(created_at, 90), "status": "pending", "actual_price": None, "actual_return": None, "results": {}},
+            "1w": {
+                "due_at": _due_at(created_at, 7),
+                "status": "pending",
+                "actual_price": None,
+                "actual_return": None,
+                "spy_return": None,
+                "alpha": None,
+                "results": {},
+            },
+            "1m": {
+                "due_at": _due_at(created_at, 30),
+                "status": "pending",
+                "actual_price": None,
+                "actual_return": None,
+                "spy_return": None,
+                "alpha": None,
+                "results": {},
+            },
+            "3m": {
+                "due_at": _due_at(created_at, 90),
+                "status": "pending",
+                "actual_price": None,
+                "actual_return": None,
+                "spy_return": None,
+                "alpha": None,
+                "results": {},
+            },
         },
     }
 
     storage.save_prediction(prediction)
+    return prediction
+
+
+async def _fetch_spy_price_at_prediction(created_at: str) -> Optional[float]:
+    """Get SPY price closest to the prediction date (for baseline)."""
+    try:
+        close = await get_close_on_or_after(BENCHMARK_TICKER, created_at)
+        return close["close"] if close else None
+    except Exception:
+        return None
+
+
+async def enrich_prediction_with_spy(prediction: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Fetch SPY price at prediction time and store it. Called right after
+    record_prediction so we have the baseline for future alpha calculation.
+    """
+    from . import storage
+
+    if prediction.get("spy_price_at_prediction") is not None:
+        return prediction
+
+    spy_price = await _fetch_spy_price_at_prediction(prediction["created_at"])
+    if spy_price:
+        prediction["spy_price_at_prediction"] = spy_price
+        storage.update_prediction(prediction)
     return prediction
 
 
@@ -61,7 +116,6 @@ def score_one(
     targets = (verdict.get("price_targets") or {}).get(timeframe, {})
     direction = targets.get("direction")
 
-    # direction_hit: did predicted direction match actual movement?
     if abs(ret) <= hold_band:
         actual_direction = "flat"
     elif ret > 0:
@@ -70,7 +124,6 @@ def score_one(
         actual_direction = "down"
     direction_hit = direction == actual_direction if direction else None
 
-    # verdict_hit: did the buy/hold/sell call pay off?
     if v == "buy":
         verdict_hit = ret > hold_band
     elif v == "sell":
@@ -78,7 +131,6 @@ def score_one(
     else:
         verdict_hit = abs(ret) <= hold_band
 
-    # target_in_range: was actual price inside the predicted range?
     low = targets.get("low")
     high = targets.get("high")
     target_in_range = (low <= actual_price <= high) if (low is not None and high is not None) else None
@@ -93,8 +145,8 @@ def score_one(
 
 async def evaluate_due_predictions() -> Dict[str, Any]:
     """
-    Idempotent: scan pending prediction timeframes, fetch actual prices,
-    score against council + per-model verdicts.
+    Idempotent: scan pending prediction timeframes, fetch actual prices and
+    SPY benchmark returns, score against council + per-model verdicts.
     """
     from . import storage
 
@@ -112,6 +164,12 @@ async def evaluate_due_predictions() -> Dict[str, Any]:
         if not price_at:
             continue
 
+        # Ensure SPY baseline is recorded
+        if pred.get("spy_price_at_prediction") is None:
+            pred = await enrich_prediction_with_spy(pred)
+
+        spy_price_at = pred.get("spy_price_at_prediction")
+
         changed = False
         for tf, outcome in pred["outcomes"].items():
             if outcome["status"] != "pending":
@@ -128,15 +186,18 @@ async def evaluate_due_predictions() -> Dict[str, Any]:
                 skipped += 1
                 continue
 
-            # Fetch actual price
+            # Fetch stock and SPY prices concurrently
             try:
-                close = await get_close_on_or_after(ticker, due_at)
+                stock_close, spy_close = await asyncio.gather(
+                    get_close_on_or_after(ticker, due_at),
+                    get_close_on_or_after(BENCHMARK_TICKER, due_at),
+                )
             except Exception as e:
                 errors.append(f"{ticker}/{tf}: {e}")
                 continue
 
             days_overdue = (now - due_dt).days
-            if close is None:
+            if stock_close is None:
                 if days_overdue > 10:
                     outcome["status"] = "unavailable"
                     changed = True
@@ -144,9 +205,21 @@ async def evaluate_due_predictions() -> Dict[str, Any]:
                     skipped += 1
                 continue
 
-            actual_price = close["close"]
+            actual_price = stock_close["close"]
+            actual_return = round(actual_price / price_at - 1, 4) if price_at else None
+
+            # S&P 500 benchmark return over same window
+            spy_return = None
+            alpha = None
+            if spy_close and spy_price_at:
+                spy_return = round(spy_close["close"] / spy_price_at - 1, 4)
+                if actual_return is not None:
+                    alpha = round(actual_return - spy_return, 4)
+
             outcome["actual_price"] = actual_price
-            outcome["actual_return"] = round(actual_price / price_at - 1, 4) if price_at else None
+            outcome["actual_return"] = actual_return
+            outcome["spy_return"] = spy_return
+            outcome["alpha"] = alpha  # stock return minus S&P 500 return
 
             # Score council
             council_score = score_one(pred.get("council_verdict"), price_at, actual_price, tf)
@@ -169,11 +242,18 @@ async def evaluate_due_predictions() -> Dict[str, Any]:
 
 
 def compute_leaderboard() -> Dict[str, Any]:
-    """Compute hit-rate leaderboard across all evaluated predictions."""
+    """
+    Compute hit-rate leaderboard across all evaluated predictions,
+    including average alpha vs S&P 500.
+    """
     from . import storage
 
     # entity -> timeframe -> list of score dicts
     entity_scores: Dict[str, Dict[str, List[Dict]]] = defaultdict(lambda: defaultdict(list))
+    # store alpha per timeframe (from outcome, not per entity)
+    tf_alphas: Dict[str, List[float]] = defaultdict(list)
+    # per prediction's council verdict, track alpha
+    council_alphas: Dict[str, List[float]] = defaultdict(list)
 
     for pred_meta in storage.list_predictions():
         pred = storage.get_prediction(pred_meta["id"])
@@ -183,6 +263,14 @@ def compute_leaderboard() -> Dict[str, Any]:
         for tf, outcome in pred.get("outcomes", {}).items():
             if outcome.get("status") != "evaluated":
                 continue
+
+            alpha = outcome.get("alpha")
+            council_verdict = (pred.get("council_verdict") or {}).get("verdict")
+
+            # Track alpha per timeframe for council calls only
+            if alpha is not None and council_verdict:
+                council_alphas[tf].append(alpha)
+
             for entity, score in outcome.get("results", {}).items():
                 entity_scores[entity][tf].append(score)
 
@@ -190,6 +278,8 @@ def compute_leaderboard() -> Dict[str, Any]:
     for entity, tf_scores in entity_scores.items():
         row = {"entity": entity, "timeframes": {}}
         total_direction = total_verdict = total_n = 0
+        all_dh = []
+        all_vh = []
 
         for tf in ("1w", "1m", "3m"):
             scores = tf_scores.get(tf, [])
@@ -198,20 +288,42 @@ def compute_leaderboard() -> Dict[str, Any]:
                 continue
             dh = [s["direction_hit"] for s in scores if s["direction_hit"] is not None]
             vh = [s["verdict_hit"] for s in scores if s["verdict_hit"] is not None]
-            row["timeframes"][tf] = {
+            all_dh.extend(dh)
+            all_vh.extend(vh)
+
+            tf_row = {
                 "n": n,
                 "direction_hit_rate": round(sum(dh) / len(dh), 3) if dh else None,
                 "verdict_hit_rate": round(sum(vh) / len(vh), 3) if vh else None,
             }
-            total_direction += sum(dh)
-            total_verdict += sum(vh)
+
+            # Add alpha (only on council entity — the strategy return vs SPY)
+            if entity == "council" and council_alphas.get(tf):
+                alphas = council_alphas[tf]
+                tf_row["avg_alpha"] = round(sum(alphas) / len(alphas), 4)
+                tf_row["beat_spy_rate"] = round(sum(1 for a in alphas if a > 0) / len(alphas), 3)
+            else:
+                tf_row["avg_alpha"] = None
+                tf_row["beat_spy_rate"] = None
+
+            row["timeframes"][tf] = tf_row
             total_n += n
 
         row["overall"] = {
             "n": total_n,
-            "direction_hit_rate": round(total_direction / total_n, 3) if total_n else None,
-            "verdict_hit_rate": round(total_verdict / total_n, 3) if total_n else None,
+            "direction_hit_rate": round(sum(all_dh) / len(all_dh), 3) if all_dh else None,
+            "verdict_hit_rate": round(sum(all_vh) / len(all_vh), 3) if all_vh else None,
         }
+
+        # Overall alpha for council
+        if entity == "council":
+            all_alphas = [a for tf_list in council_alphas.values() for a in tf_list]
+            if all_alphas:
+                row["overall"]["avg_alpha"] = round(sum(all_alphas) / len(all_alphas), 4)
+                row["overall"]["beat_spy_rate"] = round(
+                    sum(1 for a in all_alphas if a > 0) / len(all_alphas), 3
+                )
+
         leaderboard.append(row)
 
     leaderboard.sort(key=lambda x: -(x["overall"]["verdict_hit_rate"] or 0))

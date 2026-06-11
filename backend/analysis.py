@@ -160,7 +160,7 @@ async def run_stock_analysis(ticker: str) -> Dict[str, Any]:
     Returns the complete analysis dict (also saved to disk).
     """
     from . import storage
-    from .scorecard import record_prediction
+    from .scorecard import record_prediction, enrich_prediction_with_spy
 
     ticker = ticker.strip().upper()
     analysis_id = str(uuid.uuid4())
@@ -212,8 +212,9 @@ async def run_stock_analysis(ticker: str) -> Dict[str, Any]:
     # Persist analysis
     storage.save_analysis(analysis)
 
-    # Record prediction (fills in prediction_id)
+    # Record prediction + fetch SPY baseline price for benchmark comparison
     prediction = record_prediction(analysis)
+    await enrich_prediction_with_spy(prediction)
     analysis["prediction_id"] = prediction["id"]
     storage.save_analysis(analysis)
 

@@ -52,6 +52,20 @@ CACHE_TTLS = {
 # A return within ±HOLD_BAND counts as "flat" (hold was correct)
 HOLD_BAND = 0.02
 
+# Fixed universe of tracked stocks (only these can be analyzed)
+TRACKED_TICKERS = [
+    "NVDA",   # NVIDIA
+    "INTC",   # Intel
+    "AMD",    # AMD
+    "AMZN",   # Amazon
+    "AAPL",   # Apple
+    "TSLA",   # Tesla
+    "NFLX",   # Netflix
+]
+
+# Benchmark ticker for S&P 500 comparison in scoring
+BENCHMARK_TICKER = "SPY"
+
 # Optional fallback data source (free tier, 25 req/day)
 ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 
