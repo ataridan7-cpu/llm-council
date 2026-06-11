@@ -4,20 +4,70 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from .config import TRACKED_TICKERS, HOLD_BAND
+from .config import TRACKED_TICKERS, HOLD_BAND, WATCHLIST_QUICK_SIGNAL, REPAIR_MODEL
 from .market_data import get_quote
 from . import storage
+
+
+async def _quick_signal(ticker: str, quote: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    One cheap-model call per ticker → {signal: bullish/neutral/bearish, note: str}.
+    Only called when WATCHLIST_QUICK_SIGNAL=true.
+    """
+    from .openrouter import query_model
+
+    if not quote:
+        return None
+
+    price = quote.get("price", "N/A")
+    prev_close = quote.get("prev_close")
+    change_pct = ""
+    if price and prev_close:
+        pct = (price / prev_close - 1) * 100
+        change_pct = f" ({'+' if pct >= 0 else ''}{pct:.2f}% today)"
+
+    prompt = (
+        f"You are a brief market analyst. {ticker} is trading at ${price}{change_pct}.\n"
+        "In exactly 2 sentences, give a quick market sentiment signal.\n"
+        "End your response with JSON on a new line: "
+        '{"signal": "bullish" | "neutral" | "bearish", "note": "<one sentence reason>"}'
+    )
+    try:
+        result = await query_model(REPAIR_MODEL, [{"role": "user", "content": prompt}])
+        if not result:
+            return None
+        content = result.get("content", "")
+        # Extract JSON from the response
+        import json, re
+        m = re.search(r'\{[^}]+\}', content, re.DOTALL)
+        if m:
+            data = json.loads(m.group(0))
+            if data.get("signal") in ("bullish", "neutral", "bearish"):
+                return {"signal": data["signal"], "note": data.get("note", "")}
+    except Exception:
+        pass
+    return None
 
 
 async def refresh_watchlist() -> List[Dict[str, Any]]:
     """
     Fetch live quotes for all tracked tickers and compute alerts.
-    Data-only — zero LLM calls.
+    When WATCHLIST_QUICK_SIGNAL=true, also runs one cheap LLM call per ticker.
     """
     quotes = await asyncio.gather(*[get_quote(t) for t in TRACKED_TICKERS])
+
+    if WATCHLIST_QUICK_SIGNAL:
+        signals = await asyncio.gather(*[
+            _quick_signal(ticker, quote)
+            for ticker, quote in zip(TRACKED_TICKERS, quotes)
+        ])
+    else:
+        signals = [None] * len(TRACKED_TICKERS)
+
     rows = []
-    for ticker, quote in zip(TRACKED_TICKERS, quotes):
+    for ticker, quote, signal in zip(TRACKED_TICKERS, quotes, signals):
         row = _build_row(ticker, quote)
+        row["quick_signal"] = signal
         rows.append(row)
     return rows
 

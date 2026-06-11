@@ -11,6 +11,7 @@ const TICKER_NAMES = {
 };
 
 const VERDICT_COLOR = { buy: '#22a74f', hold: '#e6a817', sell: '#e53e3e' };
+const SIGNAL_COLOR = { bullish: '#22a74f', neutral: '#e6a817', bearish: '#e53e3e' };
 const ALERT_ICON = { big_move: '⚡', stale_analysis: '⚠️', no_analysis: '📭', prediction_due: '🔔', in_target: '🎯' };
 
 function TickerCard({ row }) {
@@ -61,6 +62,11 @@ function TickerCard({ row }) {
       ) : (
         <div className="tc-none">Loading...</div>
       )}
+      {row.quick_signal && (
+        <div className="tc-signal" style={{ color: SIGNAL_COLOR[row.quick_signal.signal] || '#888' }}>
+          {row.quick_signal.signal} signal
+        </div>
+      )}
     </button>
   );
 }
@@ -85,13 +91,44 @@ function BootstrapBar({ bootstrapStatus, bootstrapLog, onClose }) {
   );
 }
 
+function PortfolioBar({ portfolio }) {
+  if (!portfolio || portfolio.portfolio?.n_evaluated === 0) return null;
+  const p = portfolio.portfolio;
+  const alphaPos = p.avg_alpha != null && p.avg_alpha >= 0;
+  return (
+    <div className="portfolio-bar">
+      <span className="pb-label">Portfolio vs S&amp;P 500</span>
+      {p.avg_alpha != null && (
+        <span className="pb-kpi" style={{ color: alphaPos ? '#22a74f' : '#e53e3e' }}>
+          Avg alpha: {alphaPos ? '+' : ''}{(p.avg_alpha * 100).toFixed(2)}%
+        </span>
+      )}
+      {p.beat_spy_rate != null && (
+        <span className="pb-kpi">
+          Beat SPY: {Math.round(p.beat_spy_rate * 100)}%
+        </span>
+      )}
+      {p.verdict_hit_rate != null && (
+        <span className="pb-kpi">
+          Verdict hit: {Math.round(p.verdict_hit_rate * 100)}%
+        </span>
+      )}
+      <span className="pb-n">({p.n_evaluated} evaluated)</span>
+    </div>
+  );
+}
+
 function Dashboard() {
   const [rows, setRows] = useState(TRACKED_TICKERS.map((t) => ({ ticker: t, price: null })));
+  const [portfolio, setPortfolio] = useState(null);
   const [loading, setLoading] = useState(true);
   const [bootstrapStatus, setBootstrapStatus] = useState(null); // null | 'running' | 'done'
   const [bootstrapLog, setBootstrapLog] = useState([]);
 
-  useEffect(() => { loadWatchlist(); }, []);
+  useEffect(() => {
+    loadWatchlist();
+    api.getPortfolio().then(setPortfolio).catch(console.error);
+  }, []);
 
   const loadWatchlist = async () => {
     setLoading(true);
@@ -177,6 +214,8 @@ function Dashboard() {
           </button>
         </div>
       </div>
+
+      <PortfolioBar portfolio={portfolio} />
 
       <BootstrapBar
         bootstrapStatus={bootstrapStatus}

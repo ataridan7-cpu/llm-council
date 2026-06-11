@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import StockPage from './pages/StockPage';
 import ChatPage from './pages/ChatPage';
 import ScorecardPage from './pages/ScorecardPage';
+import NotFound from './pages/NotFound';
 import './App.css';
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
           <Route path="/stock/:ticker" element={<StockPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/scorecard" element={<ScorecardPage />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
       <Disclaimer />

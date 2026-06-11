@@ -5,7 +5,7 @@ import PriceChart from '../components/PriceChart';
 import VerdictCard from '../components/VerdictCard';
 import DossierView from '../components/DossierView';
 import PredictionHistory from '../components/PredictionHistory';
-import Stage1 from '../components/Stage1';
+import StockStage1 from '../components/StockStage1';
 import Stage2 from '../components/Stage2';
 import Stage3 from '../components/Stage3';
 import './StockPage.css';
@@ -334,7 +334,7 @@ function StockPage() {
           {displayAnalysis.stage1 && (
             <section className="stock-section">
               <h2>Stage 1 — Council Verdicts</h2>
-              <Stage1 results={displayAnalysis.stage1} />
+              <StockStage1 results={displayAnalysis.stage1} />
             </section>
           )}
 
@@ -342,7 +342,8 @@ function StockPage() {
             <section className="stock-section">
               <h2>Stage 2 — Peer Rankings</h2>
               <Stage2
-                results={displayAnalysis.stage2}
+                hideTitle
+                rankings={displayAnalysis.stage2}
                 labelToModel={displayAnalysis.metadata.label_to_model}
                 aggregateRankings={displayAnalysis.metadata.aggregate_rankings}
               />
@@ -352,7 +353,7 @@ function StockPage() {
           {displayAnalysis.stage3 && (
             <section className="stock-section">
               <h2>Stage 3 — Chairman Report</h2>
-              <Stage3 result={displayAnalysis.stage3} />
+              <Stage3 hideTitle finalResponse={displayAnalysis.stage3} />
             </section>
           )}
         </>

@@ -184,6 +184,15 @@
   margin-top: 6px;
 }
 
+.tc-signal {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
 /* Alerts panel */
 .alerts-panel {
   background: #fffdf0;
@@ -215,4 +224,37 @@
   color: #ccc;
   text-align: center;
   padding-bottom: 16px;
+}
+
+/* Portfolio alpha bar */
+.portfolio-bar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 16px;
+  background: #f0f7ff;
+  border: 1px solid #c8e0f8;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.pb-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4a90e2;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pb-kpi {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.pb-n {
+  font-size: 11px;
+  color: #aaa;
+  margin-left: auto;
 }
