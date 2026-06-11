@@ -170,12 +170,25 @@ export const api = {
     return response.json();
   },
 
-  async listPredictions(ticker, status) {
+  async listPredictions(ticker, status, full = false) {
     const params = new URLSearchParams();
     if (ticker) params.append('ticker', ticker);
     if (status) params.append('status', status);
+    if (full) params.append('full', 'true');
     const response = await fetch(`${API_BASE}/api/predictions?${params}`);
     if (!response.ok) throw new Error('Failed to list predictions');
     return response.json();
+  },
+
+  // Watchlist (live quotes + alerts, no LLM)
+  async getWatchlist() {
+    const response = await fetch(`${API_BASE}/api/watchlist`);
+    if (!response.ok) throw new Error('Failed to get watchlist');
+    return response.json();
+  },
+
+  // Bootstrap all 7 tickers (SSE)
+  async bootstrapAnalyses(onEvent) {
+    return this.streamRequest('/api/analyses/bootstrap', {}, onEvent);
   },
 };

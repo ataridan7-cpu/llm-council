@@ -4,6 +4,7 @@ import { api } from '../api';
 import PriceChart from '../components/PriceChart';
 import VerdictCard from '../components/VerdictCard';
 import DossierView from '../components/DossierView';
+import PredictionHistory from '../components/PredictionHistory';
 import Stage1 from '../components/Stage1';
 import Stage2 from '../components/Stage2';
 import Stage3 from '../components/Stage3';
@@ -69,7 +70,7 @@ function StockPage() {
       api.getStockOverview(ticker).then(setOverview).catch(() => setError(`Failed to load ${ticker}`)),
       api.getStockHistory(ticker).then(setHistory).catch(console.error),
       api.listAnalyses(ticker).then(setAnalyses).catch(console.error),
-      api.listPredictions(ticker).then(setPredictions).catch(console.error),
+      api.listPredictions(ticker, undefined, true).then(setPredictions).catch(console.error),
     ]);
   }, [ticker]);
 
@@ -323,6 +324,13 @@ function StockPage() {
             </section>
           )}
         </>
+      )}
+
+      {predictions.length > 0 && (
+        <section className="stock-section">
+          <h2>Prediction History</h2>
+          <PredictionHistory predictions={predictions} />
+        </section>
       )}
 
       {!displayAnalysis && !isRunning && (

@@ -1,0 +1,50 @@
+.ph-wrap {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.ph-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ph-table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  color: #888;
+  font-weight: 600;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.ph-table tr:not(:last-child) td {
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.ph-cell {
+  padding: 8px 12px;
+  color: #333;
+  vertical-align: middle;
+}
+
+.muted {
+  color: #bbb;
+}
+
+.ph-legend {
+  font-size: 11px;
+  color: #bbb;
+  padding: 6px 12px;
+  background: #fafafa;
+  border-top: 1px solid #f0f0f0;
+}
+
+.ph-empty {
+  color: #bbb;
+  font-size: 13px;
+  padding: 16px;
+  font-style: italic;
+}

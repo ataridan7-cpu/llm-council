@@ -16,6 +16,7 @@ from .market_data import get_price_history
 from .research import build_dossier, gather_market_data
 from .scorecard import evaluate_due_predictions, compute_leaderboard, record_prediction, enrich_prediction_with_spy
 from .config import TRACKED_TICKERS
+from .watchlist import refresh_watchlist
 
 app = FastAPI(title="LLM Council API")
 
@@ -416,8 +417,69 @@ async def trigger_evaluate():
 async def list_predictions_endpoint(
     ticker: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
+    full: bool = Query(default=False),
 ):
-    return storage.list_predictions(ticker=ticker, status=status)
+    """List predictions. Pass ?full=true to include complete outcome data."""
+    preds = storage.list_predictions(ticker=ticker, status=status)
+    if full:
+        full_preds = []
+        for p in preds:
+            loaded = storage.get_prediction(p["id"])
+            if loaded:
+                full_preds.append(loaded)
+        return full_preds
+    return preds
+
+
+# ---------------------------------------------------------------------------
+# Watchlist endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/watchlist")
+async def get_watchlist():
+    """Live quotes + alerts for all 7 tracked tickers (data-only, no LLM)."""
+    rows = await refresh_watchlist()
+    return {"tickers": rows}
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap: run analyses on all tickers that have none yet
+# ---------------------------------------------------------------------------
+
+@app.post("/api/analyses/bootstrap")
+async def bootstrap_analyses():
+    """
+    SSE stream: run a full council analysis for every tracked ticker that
+    has no existing analysis. Skips tickers that already have one.
+    Only runs missing tickers (idempotent).
+    """
+    async def event_generator():
+        missing = [
+            t for t in TRACKED_TICKERS
+            if not storage.list_analyses(ticker=t)
+        ]
+        yield _sse({"type": "bootstrap_start", "data": {"missing": missing, "total": len(missing)}})
+
+        completed = 0
+        for ticker in missing:
+            yield _sse({"type": "bootstrap_ticker_start", "data": {"ticker": ticker}})
+            try:
+                analysis = await run_stock_analysis(ticker)
+                completed += 1
+                yield _sse({
+                    "type": "bootstrap_ticker_complete",
+                    "data": {"ticker": ticker, "analysis_id": analysis["id"]},
+                })
+            except Exception as e:
+                yield _sse({"type": "bootstrap_error", "data": {"ticker": ticker, "message": str(e)}})
+
+        yield _sse({"type": "bootstrap_complete", "data": {"completed": completed, "total": len(missing)}})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 
 if __name__ == "__main__":
