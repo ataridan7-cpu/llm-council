@@ -1,16 +1,20 @@
 """FastAPI backend for LLM Council."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 import json
 import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .analysis import run_stock_analysis, stage1_collect_verdicts, stage3_chairman_report, build_analysis_question
+from .market_data import get_price_history
+from .research import build_dossier, gather_market_data
+from .scorecard import evaluate_due_predictions, compute_leaderboard, record_prediction
 
 app = FastAPI(title="LLM Council API")
 
@@ -192,6 +196,208 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             "Connection": "keep-alive",
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Stock analysis endpoints
+# ---------------------------------------------------------------------------
+
+class AnalysisRequest(BaseModel):
+    ticker: str
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+@app.post("/api/analyses")
+async def create_analysis(request: AnalysisRequest):
+    """Run a full stock analysis (blocking). Returns 404 for unknown tickers."""
+    try:
+        analysis = await run_stock_analysis(request.ticker)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return analysis
+
+
+@app.post("/api/analyses/stream")
+async def create_analysis_stream(request: AnalysisRequest):
+    """Run a full stock analysis, streaming progress as SSE events."""
+    ticker = request.ticker.strip().upper()
+
+    async def event_generator():
+        try:
+            yield _sse({"type": "analysis_start", "ticker": ticker})
+
+            # Fetch market data
+            try:
+                data = await gather_market_data(ticker)
+            except ValueError as e:
+                yield _sse({"type": "error", "message": str(e)})
+                return
+
+            quote = data["quote"]
+            yield _sse({"type": "data_fetch_complete", "data": {"quote": quote}})
+
+            # Stage 0: research dossier
+            yield _sse({"type": "stage0_start"})
+            from .research import run_research_agent
+            from .config import RESEARCH_MODELS
+
+            # Run research agents, yielding each as it completes
+            sections = []
+            agent_tasks = {
+                role: asyncio.create_task(run_research_agent(role, ticker, data))
+                for role in RESEARCH_MODELS
+            }
+            pending = set(agent_tasks.values())
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    result = task.result()
+                    if result:
+                        sections.append(result)
+                        yield _sse({"type": "stage0_agent_complete", "data": {
+                            "role": result["role"],
+                            "title": result["title"],
+                            "model": result["model"],
+                            "report": result["report"],
+                        }})
+
+            dossier_text = "\n\n---\n\n".join(
+                f"# {s['title']} Report\n\n{s['report']}" for s in sections
+            )
+            dossier = {
+                "sections": sections,
+                "data_used": {
+                    "quote": quote,
+                    "indicators": data["indicators"],
+                    "news_count": len(data["news"]),
+                },
+                "dossier_text": dossier_text,
+            }
+            yield _sse({"type": "stage0_complete", "data": {
+                "sections": [{"role": s["role"], "title": s["title"]} for s in sections]
+            }})
+
+            question = build_analysis_question(ticker, quote)
+
+            # Stage 1
+            yield _sse({"type": "stage1_start"})
+            stage1_results = await stage1_collect_verdicts(ticker, quote, dossier_text)
+            yield _sse({"type": "stage1_complete", "data": stage1_results})
+
+            # Stage 2
+            yield _sse({"type": "stage2_start"})
+            stage2_results, label_to_model = await stage2_collect_rankings(question, stage1_results)
+            aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+            yield _sse({"type": "stage2_complete", "data": stage2_results,
+                        "metadata": {"label_to_model": label_to_model, "aggregate_rankings": aggregate_rankings}})
+
+            # Stage 3
+            yield _sse({"type": "stage3_start"})
+            stage3_result = await stage3_chairman_report(
+                ticker, quote, dossier_text, stage1_results, stage2_results
+            )
+            yield _sse({"type": "stage3_complete", "data": stage3_result})
+
+            # Persist
+            import uuid as _uuid
+            analysis_id = str(_uuid.uuid4())
+            metadata = {"label_to_model": label_to_model, "aggregate_rankings": aggregate_rankings}
+            analysis = {
+                "id": analysis_id,
+                "ticker": ticker,
+                "created_at": __import__("datetime").datetime.utcnow().isoformat(),
+                "question": question,
+                "market_snapshot": quote,
+                "dossier": dossier,
+                "stage1": stage1_results,
+                "stage2": stage2_results,
+                "stage3": stage3_result,
+                "metadata": metadata,
+                "prediction_id": None,
+            }
+            storage.save_analysis(analysis)
+            prediction = record_prediction(analysis)
+            analysis["prediction_id"] = prediction["id"]
+            storage.save_analysis(analysis)
+
+            yield _sse({"type": "prediction_recorded", "data": {"prediction_id": prediction["id"]}})
+            yield _sse({"type": "complete", "data": {"analysis_id": analysis_id}})
+
+        except Exception as e:
+            yield _sse({"type": "error", "message": str(e)})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@app.get("/api/analyses")
+async def list_analyses(ticker: Optional[str] = Query(default=None)):
+    return storage.list_analyses(ticker=ticker)
+
+
+@app.get("/api/analyses/{analysis_id}")
+async def get_analysis(analysis_id: str):
+    analysis = storage.get_analysis(analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return analysis
+
+
+@app.get("/api/stocks/{ticker}/history")
+async def stock_history(
+    ticker: str,
+    period: str = Query(default="1y"),
+    interval: str = Query(default="1d"),
+):
+    history = await get_price_history(ticker, period=period, interval=interval)
+    if history is None:
+        raise HTTPException(status_code=404, detail=f"No price history for {ticker}")
+    return history
+
+
+@app.get("/api/stocks/{ticker}/overview")
+async def stock_overview(ticker: str):
+    from .market_data import get_quote
+    quote = await get_quote(ticker)
+    if quote is None:
+        raise HTTPException(status_code=404, detail=f"Unknown ticker: {ticker}")
+    analyses = storage.list_analyses(ticker=ticker)
+    latest_analysis = analyses[0] if analyses else None
+    predictions = storage.list_predictions(ticker=ticker)
+    return {
+        "quote": quote,
+        "latest_analysis": latest_analysis,
+        "predictions": predictions[:10],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Scorecard endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/scorecard")
+async def get_scorecard():
+    return compute_leaderboard()
+
+
+@app.post("/api/scorecard/evaluate")
+async def trigger_evaluate():
+    result = await evaluate_due_predictions()
+    return result
+
+
+@app.get("/api/predictions")
+async def list_predictions_endpoint(
+    ticker: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+):
+    return storage.list_predictions(ticker=ticker, status=status)
 
 
 if __name__ == "__main__":

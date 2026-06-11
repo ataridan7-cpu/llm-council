@@ -2,7 +2,7 @@
  * API client for the LLM Council backend.
  */
 
-const API_BASE = 'http://localhost:8001';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8001';
 
 export const api = {
   /**
@@ -67,43 +67,30 @@ export const api = {
   },
 
   /**
-   * Send a message and receive streaming updates.
-   * @param {string} conversationId - The conversation ID
-   * @param {string} content - The message content
-   * @param {function} onEvent - Callback function for each event: (eventType, data) => void
-   * @returns {Promise<void>}
+   * Generic SSE stream reader.
    */
-  async sendMessageStream(conversationId, content, onEvent) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message/stream`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ content }),
-      }
-    );
-
+  async streamRequest(path, body, onEvent) {
+    const response = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
     if (!response.ok) {
-      throw new Error('Failed to send message');
+      throw new Error(`Request failed: ${response.status}`);
     }
-
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-
+    let buffer = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep incomplete last line
       for (const line of lines) {
         if (line.startsWith('data: ')) {
-          const data = line.slice(6);
           try {
-            const event = JSON.parse(data);
+            const event = JSON.parse(line.slice(6));
             onEvent(event.type, event);
           } catch (e) {
             console.error('Failed to parse SSE event:', e);
@@ -111,5 +98,84 @@ export const api = {
         }
       }
     }
+  },
+
+  /**
+   * Send a message and receive streaming updates.
+   */
+  async sendMessageStream(conversationId, content, onEvent) {
+    return this.streamRequest(
+      `/api/conversations/${conversationId}/message/stream`,
+      { content },
+      onEvent
+    );
+  },
+
+  // Stock analysis
+
+  async runAnalysisStream(ticker, onEvent) {
+    return this.streamRequest('/api/analyses/stream', { ticker }, onEvent);
+  },
+
+  async runAnalysis(ticker) {
+    const response = await fetch(`${API_BASE}/api/analyses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker }),
+    });
+    if (!response.ok) throw new Error(`Failed to run analysis: ${response.status}`);
+    return response.json();
+  },
+
+  async listAnalyses(ticker) {
+    const url = ticker
+      ? `${API_BASE}/api/analyses?ticker=${encodeURIComponent(ticker)}`
+      : `${API_BASE}/api/analyses`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to list analyses');
+    return response.json();
+  },
+
+  async getAnalysis(id) {
+    const response = await fetch(`${API_BASE}/api/analyses/${id}`);
+    if (!response.ok) throw new Error('Analysis not found');
+    return response.json();
+  },
+
+  async getStockOverview(ticker) {
+    const response = await fetch(`${API_BASE}/api/stocks/${encodeURIComponent(ticker)}/overview`);
+    if (!response.ok) throw new Error(`Unknown ticker: ${ticker}`);
+    return response.json();
+  },
+
+  async getStockHistory(ticker, period = '1y', interval = '1d') {
+    const response = await fetch(
+      `${API_BASE}/api/stocks/${encodeURIComponent(ticker)}/history?period=${period}&interval=${interval}`
+    );
+    if (!response.ok) throw new Error('Failed to get price history');
+    return response.json();
+  },
+
+  // Scorecard
+
+  async getScorecard() {
+    const response = await fetch(`${API_BASE}/api/scorecard`);
+    if (!response.ok) throw new Error('Failed to get scorecard');
+    return response.json();
+  },
+
+  async triggerEvaluate() {
+    const response = await fetch(`${API_BASE}/api/scorecard/evaluate`, { method: 'POST' });
+    if (!response.ok) throw new Error('Failed to trigger evaluation');
+    return response.json();
+  },
+
+  async listPredictions(ticker, status) {
+    const params = new URLSearchParams();
+    if (ticker) params.append('ticker', ticker);
+    if (status) params.append('status', status);
+    const response = await fetch(`${API_BASE}/api/predictions?${params}`);
+    if (!response.ok) throw new Error('Failed to list predictions');
+    return response.json();
   },
 };

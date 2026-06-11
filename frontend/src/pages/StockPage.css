@@ -1,0 +1,135 @@
+.stock-page {
+  padding: 24px 32px;
+  max-width: 1100px;
+  margin: 0 auto;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.stock-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.stock-title h1 {
+  font-size: 32px;
+  font-weight: 800;
+  color: #1a2332;
+  margin: 0 0 6px;
+}
+
+.stock-quote {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.quote-price {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a2332;
+}
+
+.quote-name {
+  font-size: 14px;
+  color: #888;
+}
+
+.quote-change {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.quote-change.pos { color: #22a74f; }
+.quote-change.neg { color: #e53e3e; }
+
+.run-btn {
+  padding: 12px 24px;
+  background: #4a90e2;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+  margin-top: 4px;
+}
+
+.run-btn:hover:not(:disabled) {
+  background: #357abd;
+}
+
+.run-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.status-bar {
+  background: #f0f7ff;
+  border: 1px solid #c8e0f8;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: #4a90e2;
+  margin-bottom: 14px;
+}
+
+.analysis-history {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #666;
+}
+
+.analysis-pill {
+  padding: 4px 10px;
+  border: 1px solid #ddd;
+  border-radius: 20px;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.analysis-pill:hover {
+  border-color: #4a90e2;
+}
+
+.analysis-pill.active {
+  border-color: #4a90e2;
+  background: #f0f7ff;
+}
+
+.stock-section {
+  margin-bottom: 24px;
+}
+
+.stock-section h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #333;
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.stock-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: #aaa;
+  font-size: 15px;
+}
+
+.stock-error {
+  text-align: center;
+  padding: 60px 20px;
+  color: #e53e3e;
+  font-size: 15px;
+}

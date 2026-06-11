@@ -1,11 +1,11 @@
-"""JSON-based storage for conversations."""
+"""JSON-based storage for conversations, analyses, and predictions."""
 
 import json
 import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from .config import DATA_DIR
+from .config import DATA_DIR, ANALYSES_DIR, PREDICTIONS_DIR
 
 
 def ensure_data_dir():
@@ -170,3 +170,112 @@ def update_conversation_title(conversation_id: str, title: str):
 
     conversation["title"] = title
     save_conversation(conversation)
+
+
+# ---------------------------------------------------------------------------
+# Analyses
+# ---------------------------------------------------------------------------
+
+def _ensure_dir(path: str):
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def _analysis_path(analysis_id: str) -> str:
+    return os.path.join(ANALYSES_DIR, f"{analysis_id}.json")
+
+
+def save_analysis(analysis: Dict[str, Any]):
+    _ensure_dir(ANALYSES_DIR)
+    with open(_analysis_path(analysis["id"]), 'w') as f:
+        json.dump(analysis, f, indent=2)
+
+
+def get_analysis(analysis_id: str) -> Optional[Dict[str, Any]]:
+    path = _analysis_path(analysis_id)
+    if not os.path.exists(path):
+        return None
+    with open(path, 'r') as f:
+        return json.load(f)
+
+
+def list_analyses(ticker: Optional[str] = None) -> List[Dict[str, Any]]:
+    _ensure_dir(ANALYSES_DIR)
+    results = []
+    for filename in os.listdir(ANALYSES_DIR):
+        if not filename.endswith('.json'):
+            continue
+        with open(os.path.join(ANALYSES_DIR, filename), 'r') as f:
+            data = json.load(f)
+        if ticker and data.get("ticker") != ticker.upper():
+            continue
+        verdict = (data.get("stage3") or {}).get("verdict")
+        results.append({
+            "id": data["id"],
+            "ticker": data.get("ticker"),
+            "created_at": data.get("created_at"),
+            "verdict": (verdict or {}).get("verdict") if verdict else None,
+            "confidence": (verdict or {}).get("confidence") if verdict else None,
+            "price_at": (data.get("market_snapshot") or {}).get("price"),
+            "prediction_id": data.get("prediction_id"),
+        })
+    results.sort(key=lambda x: x["created_at"] or "", reverse=True)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Predictions
+# ---------------------------------------------------------------------------
+
+def _prediction_path(prediction_id: str) -> str:
+    return os.path.join(PREDICTIONS_DIR, f"{prediction_id}.json")
+
+
+def save_prediction(prediction: Dict[str, Any]):
+    _ensure_dir(PREDICTIONS_DIR)
+    with open(_prediction_path(prediction["id"]), 'w') as f:
+        json.dump(prediction, f, indent=2)
+
+
+def get_prediction(prediction_id: str) -> Optional[Dict[str, Any]]:
+    path = _prediction_path(prediction_id)
+    if not os.path.exists(path):
+        return None
+    with open(path, 'r') as f:
+        return json.load(f)
+
+
+def update_prediction(prediction: Dict[str, Any]):
+    save_prediction(prediction)
+
+
+def list_predictions(
+    ticker: Optional[str] = None, status: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    _ensure_dir(PREDICTIONS_DIR)
+    results = []
+    for filename in os.listdir(PREDICTIONS_DIR):
+        if not filename.endswith('.json'):
+            continue
+        with open(os.path.join(PREDICTIONS_DIR, filename), 'r') as f:
+            data = json.load(f)
+        if ticker and data.get("ticker") != ticker.upper():
+            continue
+        outcomes = data.get("outcomes", {})
+        # Filter by status: include if any timeframe matches
+        if status:
+            if not any(o.get("status") == status for o in outcomes.values()):
+                continue
+        council_v = (data.get("council_verdict") or {}).get("verdict")
+        results.append({
+            "id": data["id"],
+            "ticker": data.get("ticker"),
+            "analysis_id": data.get("analysis_id"),
+            "created_at": data.get("created_at"),
+            "price_at_prediction": data.get("price_at_prediction"),
+            "council_verdict": council_v,
+            "outcomes_summary": {
+                tf: o.get("status") for tf, o in outcomes.items()
+            },
+        })
+    results.sort(key=lambda x: x["created_at"] or "", reverse=True)
+    return results

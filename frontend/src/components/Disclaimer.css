@@ -1,0 +1,9 @@
+.disclaimer {
+  flex-shrink: 0;
+  text-align: center;
+  padding: 6px 16px;
+  font-size: 11px;
+  color: #999;
+  background: #f8f8f8;
+  border-top: 1px solid #eee;
+}
