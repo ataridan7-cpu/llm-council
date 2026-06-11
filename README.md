@@ -1,87 +1,94 @@
-# LLM Council
+# Stock Council — LLM Investment Committee
 
-![llmcouncil](header.jpg)
+A multi-stage LLM deliberation system that researches and debates investments in 7 tech stocks, tracks its own predictions, and scores results against the S&P 500.
 
-The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
+## How It Works
 
-In a bit more detail, here is what happens when you submit a query:
+For each stock analysis:
 
-1. **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
-2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+1. **Stage 0 — Research Dossier**: Three specialist AI agents (fundamentals, technical, news/sentiment) each receive real market data (yfinance + SEC EDGAR filings) and write their section of a research report.
+2. **Stage 1 — Council Opinions**: Four frontier LLMs each read the dossier and produce a structured verdict (buy/hold/sell, confidence %, price targets for 1w/1m/3m).
+3. **Stage 2 — Peer Review**: Models rank each other's responses anonymously (preventing favoritism).
+4. **Stage 3 — Chairman Synthesis**: The chairman model writes the final investment report and issues the council's official verdict.
 
-## Vibe Code Alert
+Every verdict is logged. After the target windows pass, actual prices are fetched and each prediction is scored — including alpha vs S&P 500 (SPY).
 
-This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
+## Tracked Tickers
+
+NVDA · INTC · AMD · AMZN · AAPL · TSLA · NFLX
 
 ## Setup
 
-### 1. Install Dependencies
+### 1. Install dependencies
 
-The project uses [uv](https://docs.astral.sh/uv/) for project management.
-
-**Backend:**
 ```bash
 uv sync
+cd frontend && npm install && cd ..
 ```
 
-**Frontend:**
-```bash
-cd frontend
-npm install
-cd ..
-```
-
-### 2. Configure API Key
-
-Create a `.env` file in the project root:
+### 2. Configure `.env`
 
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-...
+
+# Optional
+SEC_USER_AGENT=your-app contact@example.com
+ALPHA_VANTAGE_API_KEY=...
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+ENABLE_SCHEDULER=false        # set true for daily auto-evaluation
+WATCHLIST_QUICK_SIGNAL=false  # set true for cheap per-ticker signals on refresh
 ```
 
-Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
+### 3. Run
 
-### 3. Configure Models (Optional)
-
-Edit `backend/config.py` to customize the council:
-
-```python
-COUNCIL_MODELS = [
-    "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
-]
-
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
-```
-
-## Running the Application
-
-**Option 1: Use the start script**
 ```bash
+# Both servers at once
 ./start.sh
+
+# Or manually
+uv run python -m backend.main   # backend on :8001
+cd frontend && npm run dev       # frontend on :5173
 ```
 
-**Option 2: Run manually**
+### 4. Bootstrap (first run)
 
-Terminal 1 (Backend):
+Open http://localhost:5173 — the Dashboard shows all 7 tickers. Click **Run All Analyses** to run the full council on every ticker. This takes several minutes (one analysis at a time, each requires ~10–15 LLM calls).
+
+### 5. Evaluate predictions
+
+After 1 week / 1 month / 3 months, go to the **Scorecard** page and click **Evaluate Now**. Actual prices and SPY benchmark returns are fetched automatically.
+
+### 6. Run tests
+
 ```bash
-uv run python -m backend.main
+uv run --extra dev python -m pytest tests/ -v
 ```
 
-Terminal 2 (Frontend):
-```bash
-cd frontend
-npm run dev
-```
+## Architecture
 
-Then open http://localhost:5173 in your browser.
+```
+Dashboard (7 tickers, live prices, alerts)
+    ↓ click ticker
+StockPage (price chart, dossier, council stages, prediction history)
+    ↓ "Run Council Analysis"
+Stage 0: research agents (gemini-flash / gpt-mini, cheap)
+    ↓
+Stage 1: council verdicts (frontier models, structured JSON)
+    ↓
+Stage 2: anonymized peer ranking (existing council machinery)
+    ↓
+Stage 3: chairman synthesis + final verdict
+    ↓
+data/analyses/{id}.json + data/predictions/{id}.json
+    ↓
+Scorecard: hit rates per model + alpha vs S&P 500
+```
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
-- **Frontend:** React + Vite, react-markdown for rendering
-- **Storage:** JSON files in `data/conversations/`
-- **Package Management:** uv for Python, npm for JavaScript
+- **Backend**: FastAPI, Python 3.10+, httpx, yfinance, APScheduler, feedparser
+- **Frontend**: React 19, Vite, react-router-dom, lightweight-charts, react-markdown
+- **Data**: JSON files (`data/analyses/`, `data/predictions/`, `data/cache/`)
+- **LLMs**: OpenRouter (multi-provider: OpenAI, Google, Anthropic, xAI)
+
+> **Disclaimer**: For research and educational purposes only. Not financial advice.

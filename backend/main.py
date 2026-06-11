@@ -1,10 +1,12 @@
 """FastAPI backend for LLM Council."""
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+import os
 import uuid
 import json
 import asyncio
@@ -15,15 +17,36 @@ from .analysis import run_stock_analysis, stage1_collect_verdicts, stage3_chairm
 from .market_data import get_price_history
 from .research import build_dossier, gather_market_data
 from .scorecard import evaluate_due_predictions, compute_leaderboard, record_prediction, enrich_prediction_with_spy
-from .config import TRACKED_TICKERS
+from .config import TRACKED_TICKERS, ENABLE_SCHEDULER
 from .watchlist import refresh_watchlist
 
-app = FastAPI(title="LLM Council API")
+_CORS_ORIGINS = [o.strip() for o in os.getenv(
+    "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
+).split(",") if o.strip()]
 
-# Enable CORS for local development
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if ENABLE_SCHEDULER:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        scheduler = AsyncIOScheduler()
+        # Evaluate due predictions daily at 22:30 UTC (after US market close)
+        scheduler.add_job(evaluate_due_predictions, "cron", hour=22, minute=30)
+        # Refresh watchlist quotes daily at 13:35 UTC (just after US open)
+        scheduler.add_job(refresh_watchlist, "cron", hour=13, minute=35)
+        scheduler.start()
+        print("APScheduler started (daily evaluation + watchlist refresh)")
+        yield
+        scheduler.shutdown()
+    else:
+        yield
+
+
+app = FastAPI(title="LLM Council API", lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

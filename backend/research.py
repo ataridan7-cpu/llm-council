@@ -5,6 +5,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from .config import RESEARCH_MODELS
+from .edgar import format_filings_for_prompt, get_recent_filings
 from .market_data import (
     compute_indicators,
     get_fundamentals,
@@ -34,11 +35,12 @@ async def gather_market_data(ticker: str) -> Dict[str, Any]:
     Raises:
         ValueError: if the ticker is invalid (no quote available)
     """
-    quote, history, fundamentals, news = await asyncio.gather(
+    quote, history, fundamentals, news, filings = await asyncio.gather(
         get_quote(ticker),
         get_price_history(ticker, period="1y", interval="1d"),
         get_fundamentals(ticker),
         get_news(ticker),
+        get_recent_filings(ticker),
     )
     if quote is None:
         raise ValueError(f"Unknown ticker or no market data available: {ticker}")
@@ -51,6 +53,7 @@ async def gather_market_data(ticker: str) -> Dict[str, Any]:
         "indicators": compute_indicators(candles) if candles else {},
         "fundamentals": fundamentals or {},
         "news": news or [],
+        "filings": filings or [],
     }
 
 
@@ -85,13 +88,16 @@ def _build_role_prompt(role: str, ticker: str, data: Dict[str, Any]) -> str:
     )
 
     if role == "fundamentals":
+        filings_text = format_filings_for_prompt(data.get("filings", []))
         body = (
             "Company fundamentals (from market data):\n"
             f"{json.dumps(data['fundamentals'], indent=2)}\n\n"
             "Key technical context:\n"
             f"{json.dumps(data['indicators'], indent=2)}\n\n"
+            "Recent SEC filings:\n"
+            f"{filings_text}\n\n"
             "Write a fundamentals report with these sections:\n"
-            "## Valuation\n## Growth & Profitability\n## Balance Sheet & Cash Flow\n## Red Flags\n## Key Takeaways"
+            "## Valuation\n## Growth & Profitability\n## Balance Sheet & Cash Flow\n## Recent Filings\n## Red Flags\n## Key Takeaways"
         )
     elif role == "technical":
         body = (
@@ -103,11 +109,14 @@ def _build_role_prompt(role: str, ticker: str, data: Dict[str, Any]) -> str:
             "## Trend & Momentum\n## Support & Resistance\n## Volume Analysis\n## Notable Patterns\n## Key Takeaways"
         )
     else:  # news
+        filings_text = format_filings_for_prompt(data.get("filings", []))
         body = (
             "Recent news headlines and summaries:\n"
             f"{_news_digest(data['news'])}\n\n"
+            "Recent SEC filings (for regulatory/earnings context):\n"
+            f"{filings_text}\n\n"
             "Write a news & sentiment report with these sections:\n"
-            "## Major Developments\n## Sentiment Assessment\n## Catalysts & Upcoming Events\n## Key Takeaways"
+            "## Major Developments\n## Regulatory & Filings\n## Sentiment Assessment\n## Catalysts & Upcoming Events\n## Key Takeaways"
         )
 
     return f"{header}{body}\n\n{_SHARED_RULES}"
@@ -151,6 +160,7 @@ async def build_dossier(ticker: str, data: Dict[str, Any]) -> Dict[str, Any]:
             "quote": data["quote"],
             "indicators": data["indicators"],
             "news_count": len(data["news"]),
+            "filings_count": len(data.get("filings", [])),
         },
         "dossier_text": dossier_text,
     }

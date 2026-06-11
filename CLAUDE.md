@@ -132,14 +132,88 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
 4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
 
+## Stock Analysis Modules (new)
+
+**`backend/market_data.py`**
+- Cached yfinance wrappers: `get_quote`, `get_price_history`, `get_fundamentals`, `get_news`, `get_close_on_or_after`
+- Pure-python indicators: `compute_indicators` (SMA 20/50/200, RSI14, 52w hi/lo, returns)
+- TTL file cache under `data/cache/market/`; stale fallback on network failure
+
+**`backend/edgar.py`**
+- SEC EDGAR free API: fetch recent 10-K/10-Q/8-K for any ticker
+- Requires `SEC_USER_AGENT` env var (contact info per SEC policy)
+- `get_recent_filings(ticker)` → injected into fundamentals + news research prompts
+
+**`backend/research.py`** — Stage 0
+- `gather_market_data(ticker)` fetches all market data in parallel (raises ValueError on bad ticker)
+- `build_dossier(ticker, data)` runs 3 specialist agents concurrently (fundamentals/technical/news)
+- Each agent gets role-specific data slice; ~800-word report cap; no buy/hold/sell
+
+**`backend/verdict.py`**
+- `StockVerdict` pydantic model (verdict, confidence 0-100, price_targets{1w/1m/3m}, thesis, risks)
+- `extract_verdict_json(text)` — fenced-block → balanced-brace fallback
+- `parse_or_repair_verdict(text)` — one cheap-model repair call before giving up
+
+**`backend/analysis.py`** — Finance council pipeline
+- `run_stock_analysis(ticker)` — full Stage 0→1→2→3 pipeline + persistence
+- Reuses `stage2_collect_rankings` and `calculate_aggregate_rankings` from `council.py` verbatim
+- Stage 1 prompt: dossier + current price + `VERDICT_JSON_INSTRUCTIONS`
+
+**`backend/scorecard.py`**
+- `record_prediction(analysis)` — logs price-at-prediction + SPY baseline
+- `evaluate_due_predictions()` — idempotent; fetches actual + SPY prices; computes alpha
+- `compute_leaderboard()` — direction/verdict hit rates + avg alpha vs SPY for council
+
+**`backend/watchlist.py`**
+- `refresh_watchlist()` — live quotes + alerts for all 7 tickers, zero LLM calls
+- Alerts: big day moves (≥5%), stale analysis (≥30d), prediction coming due, price in target range
+
+**`backend/edgar.py`**
+- Free SEC EDGAR filings injected into fundamentals + news agent prompts
+
+### Tracked Universe
+```python
+TRACKED_TICKERS = ["NVDA", "INTC", "AMD", "AMZN", "AAPL", "TSLA", "NFLX"]
+BENCHMARK_TICKER = "SPY"  # S&P 500 comparison
+```
+All analysis endpoints validate against this list.
+
+### New API Endpoints
+- `GET /api/tickers` — tracked universe
+- `POST /api/analyses` / `POST /api/analyses/stream` — run analysis (SSE)
+- `POST /api/analyses/bootstrap` — run all missing tickers sequentially (SSE)
+- `GET /api/analyses?ticker=` / `GET /api/analyses/{id}`
+- `GET /api/stocks/{ticker}/history` / `GET /api/stocks/{ticker}/overview`
+- `GET /api/watchlist` — live quotes + alerts
+- `GET /api/scorecard` / `POST /api/scorecard/evaluate`
+- `GET /api/predictions?ticker=&status=&full=`
+
+### Frontend Routes
+- `/` — Dashboard (7-ticker grid, live prices, alerts, bootstrap button)
+- `/stock/:ticker` — StockPage (chart, dossier, council stages, prediction history)
+- `/scorecard` — Leaderboard with alpha vs S&P 500
+- `/chat` — Original LLM Council chat (unchanged)
+
+### Scheduling (APScheduler)
+Set `ENABLE_SCHEDULER=true` in env. Runs:
+- `evaluate_due_predictions` daily at 22:30 UTC
+- `refresh_watchlist` daily at 13:35 UTC
+
+## Testing
+```bash
+uv run --extra dev python -m pytest tests/ -v
+```
+Tests cover: `extract_verdict_json`, `StockVerdict`, `score_one`, indicator math, storage round-trips (45 tests).
+
 ## Future Enhancement Ideas
 
 - Configurable council/chairman via UI instead of config file
 - Streaming responses instead of batch loading
 - Export conversations to markdown/PDF
-- Model performance analytics over time
 - Custom ranking criteria (not just accuracy/insight)
 - Support for reasoning models (o1, etc.) with special handling
+- Multi-ticker portfolio-level signals
+- Email/push alerts when predictions come due
 
 ## Testing Notes
 
