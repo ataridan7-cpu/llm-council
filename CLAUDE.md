@@ -132,6 +132,29 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
 4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
 
+## Stock Council Module (`backend/stocks/`)
+
+Council Capital adapts the 3-stage engine to stock prediction over 7 fixed
+tickers; see `STOCKS.md` for full docs. Key facts for future sessions:
+
+- The chat council in `council.py` is untouched; the stock module has its
+  own runner (`stocks/council_runner.py`) because `council.py` hardcodes
+  `COUNCIL_MODELS` and Q&A prompts. It reuses `parse_ranking_from_text`,
+  `calculate_aggregate_rankings`, and `openrouter.py` (which gained
+  backward-compatible `timeout`/`extra_payload` kwargs).
+- Point-in-time discipline: historical runs see ONLY price-derived features
+  from `prices.loc[:as_of]` (`stocks/data.py`). Never add `Ticker.info` or
+  news to historical prompts — yfinance serves current-state values only.
+- Verdicts are normalized server-side (`normalize_verdicts`): stance trusted
+  over weight sign, |w| <= 0.25, gross <= 1.0. The portfolio engine never
+  sees raw model output.
+- Storage: JSON under `data/stocks/` (gitignored), atomic writes, one global
+  asyncio RUN_LOCK; API returns 409 when a run is in progress.
+- Frontend is the `nextjs-admin-dashboard` repo (Next.js, port 3000),
+  client-fetching `/api/stocks/*`; CORS for :3000 was already enabled.
+- Tests: `uv run pytest` (mocked end-to-end, no API key needed). Cheap
+  pipeline validation: `python -m backend.stocks.council_runner --dry-run`.
+
 ## Future Enhancement Ideas
 
 - Configurable council/chairman via UI instead of config file
