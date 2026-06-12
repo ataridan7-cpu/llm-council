@@ -11,8 +11,11 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .stocks.routes import router as stocks_router
+from .stocks.scheduler import stocks_lifespan
 
-app = FastAPI(title="LLM Council API")
+app = FastAPI(title="LLM Council API", lifespan=stocks_lifespan)
+app.include_router(stocks_router)
 
 # Enable CORS for local development
 app.add_middleware(
